@@ -57,7 +57,7 @@ def monitorear_red(red, pubsub_client):
                 pubsub_client.publishMessages(evento)
             
             dispositivos_conocidos = dispositivos_actuales
-            time.sleep(10)  # Pause before the next scan
+            time.sleep(300)  # Pause before the next scan
     except KeyboardInterrupt:
         print("Monitoring stopped.")
 
