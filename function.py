@@ -7,11 +7,22 @@ from datetime import datetime
 # Configura el cliente de BigQuery
 client = bigquery.Client()
 
-# Función principal que Cloud Functions ejecutará
-def verify_and_log(request):
-    request_json = request.get_json()
+def decode_json(message):
+    # Decodificar mensaje de Pub/Sub
+    pubsub_message = message.decode('utf-8')
+    
+    # Convertir string decodificado en formato JSON
+    msg = json.loads(pubsub_message)
+    
+    # Retorna el mensaje JSON
+    return msg
 
-    if request_json and 'mac' in request_json:
+def verify_and_log(event, context):
+    # Obtener y decodificar el mensaje de Pub/Sub
+    message = event['data']  # Accede al dato del evento de Pub/Sub
+    request_json = decode_json(message)
+
+    if 'mac' in request_json:
         mac_address = request_json['mac']
         
         # Conectar a Cloud SQL para verificar el MAC
@@ -72,3 +83,4 @@ def verify_and_log(request):
             connection.close()
 
     return 'Function executed successfully!'
+
