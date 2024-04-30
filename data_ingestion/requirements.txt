@@ -1,7 +1,6 @@
-time
-scapy.all
+scapy
 ipcalc
-json
 datetime
 google.cloud
-logging
+google-cloud-pubsub
+google-apitools
