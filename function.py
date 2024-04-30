@@ -1,57 +1,74 @@
-import base64
-import json
+import os
 from google.cloud import bigquery
+import pymysql
+import json
+from datetime import datetime
 
-# Inicializa el cliente de BigQuery
+# Configura el cliente de BigQuery
 client = bigquery.Client()
 
-def verify_and_update_data(event, context):
-    # Decodifica el mensaje de Pub/Sub
-    if 'data' in event:
-        message_data = base64.b64decode(event['data']).decode('utf-8')
-        data = json.loads(message_data)
-        mac_address = data['mac']
+# Función principal que Cloud Functions ejecutará
+def verify_and_log(request):
+    request_json = request.get_json()
 
-        # Verifica y escribe en BigQuery
-        if not check_if_exists(mac_address):
-            write_to_bigquery(data)
+    if request_json and 'mac' in request_json:
+        mac_address = request_json['mac']
+        
+        # Conectar a Cloud SQL para verificar el MAC
+        connection = pymysql.connect(host=os.environ['INSTANCE_CONNECTION_NAME'],
+                                     user=os.environ['DB_USER'],
+                                     password=os.environ['DB_PASS'],
+                                     db=os.environ['DB_NAME'])
+        try:
+            with connection.cursor() as cursor:
+                # Verificar si el MAC está registrado
+                sql = "SELECT COUNT(*) FROM registered_devices WHERE mac = %s"
+                cursor.execute(sql, (mac_address,))
+                result = cursor.fetchone()
+                
+                if result[0] > 0:
+                    # MAC está registrado, verifica en BigQuery en la tabla 'mac_list'
+                    query = f"""
+                        SELECT mac FROM `{os.environ['BQ_DATASET']}.mac_list`
+                        WHERE mac = '{mac_address}'
+                    """
+                    query_job = client.query(query)
+                    results = list(query_job)
 
-        # Sincroniza los registros de BigQuery
-        synchronize_bigquery([mac_address])
+                    if len(results) == 0:
+                        # No hay entradas con esa MAC, escribimos los datos
+                        table_id = f"{os.environ['BQ_DATASET']}.mac_list"
+                        rows_to_insert = [
+                            {u"mac": request_json['mac'], u"ip": request_json['ip'], u"timestamp": request_json['timestamp']}
+                        ]
+                        client.insert_rows(table_id, rows_to_insert)
+                        print("New MAC entry added to mac_list.")
+                    else:
+                        # MAC está en BigQuery, reescribe el registro en 'disconnects'
+                        disconnect_table_id = f"{os.environ['BQ_DATASET']}.disconnects"
+                        current_timestamp = datetime.utcnow().isoformat()
+                        disconnect_rows_to_insert = [
+                            {u"mac": mac_address, u"timestamp": current_timestamp}
+                        ]
+                        client.insert_rows_json(disconnect_table_id, disconnect_rows_to_insert)
+                        print("Disconnect entry added.")
 
-def check_if_exists(mac_address):
-    query = f"""
-    SELECT mac
-    FROM `your_project.your_dataset.your_table`
-    WHERE mac = '{mac_address}'
-    """
-    query_job = client.query(query)
-    results = list(query_job)
-    return len(results) > 0
+                        # Eliminar la MAC de 'mac_list'
+                        delete_query = f"""
+                            DELETE FROM `{os.environ['BQ_DATASET']}.mac_list` WHERE mac = '{mac_address}'
+                        """
+                        client.query(delete_query)
+                        print("MAC removed from mac_list.")
+                else:
+                    # MAC no está registrado, registra en BigQuery en 'unknown_users'
+                    unknown_table_id = f"{os.environ['BQ_DATASET']}.unknown_users"
+                    unknown_rows_to_insert = [
+                        {u"mac": request_json['mac'], u"ip": request_json['ip'], u"timestamp": request_json['timestamp']}
+                    ]
+                    client.insert_rows_json(unknown_table_id, unknown_rows_to_insert)
+                    print("MAC entry added to unknown_users.")
 
-def write_to_bigquery(data):
-    table_id = "your_project.your_dataset.your_table"
-    rows_to_insert = [data]
-    errors = client.insert_rows_json(table_id, rows_to_insert)
-    if errors == []:
-        print("New rows have been added.")
-    else:
-        print("Encountered errors while inserting rows: {}".format(errors))
+        finally:
+            connection.close()
 
-def synchronize_bigquery(current_macs):
-    # Obtén todos los MACs de BigQuery
-    query = """
-    SELECT mac
-    FROM `your_project.your_dataset.your_table`
-    """
-    macs_in_bigquery = [row['mac'] for row in client.query(query)]
-    
-    # Determina los MACs a eliminar
-    macs_to_drop = [mac for mac in macs_in_bigquery if mac not in current_macs]
-    
-    # Elimina los MACs no deseados
-    for mac in macs_to_drop:
-        query = f"DELETE FROM `your_project.your_dataset.your_table` WHERE mac = '{mac}'"
-        client.query(query)
-
-# Nota: asegúrate de configurar el trigger de Pub/Sub correctamente al desplegar la función
+    return 'Function executed successfully!'
