@@ -46,21 +46,20 @@ def monitorear_red(red, pubsub_client):
             timestamp = datetime.now().isoformat()
             dispositivos_actuales = obtener_dispositivos_activos(red)
             nuevos_dispositivos = {ip: mac for ip, mac in dispositivos_actuales.items() if ip not in dispositivos_conocidos}
-
-            # Prepare a single message with all current devices
-            if dispositivos_actuales:
-                evento_total = {
+            
+            for ip, mac in dispositivos_actuales.items():
+                evento = {
                     "TIME": timestamp,
-                    "DEVICES": dispositivos_actuales
+                    "IP": ip,
+                    "MAC": mac
                 }
-                print(json.dumps(evento_total, indent=4))
-                pubsub_client.publishMessages(evento_total)
-
+                print(json.dumps(evento, indent=4))
+                pubsub_client.publishMessages(evento)
+            
             dispositivos_conocidos = dispositivos_actuales
             time.sleep(10)  # Pause before the next scan
     except KeyboardInterrupt:
         print("Monitoring stopped.")
-
 
 if __name__ == "__main__":
     project_id = 'gft-edem-hackathon'
