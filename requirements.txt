@@ -1,0 +1,6 @@
+scapy
+ipcalc
+DateTime
+google.cloud
+impacket
+pcapy[0.11.4]

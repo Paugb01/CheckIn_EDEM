@@ -4,9 +4,53 @@ from datetime import datetime
 import json
 from google.cloud import pubsub_v1
 import logging
+import argparse
 
+
+parser = argparse.ArgumentParser(description=('IP Data'))
+parser.add_argument(
+    '--project_id',
+    required=True
+)
+parser.add_argument(
+    '--topic-name',
+    required=True
+)
+
+parser.add_argument(
+    '--subscription-name',
+    required=True
+)
+
+args, opts = parser.parse_known_args()
 
 conf.verb = 0
+
+
+
+
+class PubSubMessages:
+
+    """ Publish Messages in our PubSub Topic """
+
+    def _init_(self, project_id: str, topic_name: str, subscription_name: str):
+        self.publisher = pubsub_v1.PublisherClient()
+        self.project_id = project_id
+        self.topic_name = topic_name
+        self.subscription_name = subscription_name
+
+    def publishMessages(self, message: str):
+        json_str = json.dumps(message)
+        topic_path = self.publisher.topic_path(self.project_id, self.topic_name)
+        self.publisher.publish(topic_path, json_str.encode("utf-8"))
+        logging.info("A New person has been monitored. Id: %s", message['persona_id'])
+
+    def _exit_(self):
+        self.publisher.transport.close()
+        logging.info("PubSub Client closed.")
+
+
+publisher = PubSubMessages()
 
 def obtener_dispositivos_activos(red):
     """Devuelve un diccionario con las direcciones MAC e IP de los dispositivos activos."""
@@ -18,6 +62,7 @@ def obtener_dispositivos_activos(red):
 
 def monitorear_red(red):
     dispositivos_conocidos = {}
+
     try:
         while True:
             timestamp = datetime.now().isoformat()
@@ -31,34 +76,14 @@ def monitorear_red(red):
                     "IP": ip,
                     "MAC": mac
                 }
-                print(json.dumps(evento_nuevos, indent=4))
+                
+                PubSubMessages.publishMessages(message=json.dumps(evento_nuevos, indent=4))
                       
             
             dispositivos_conocidos = dispositivos_actuales
             time.sleep(10)  # Pausa antes del siguiente escaneo
     except KeyboardInterrupt:
         print("Monitoreo detenido.")
-
-
-class PubSubMessages:
-
-    """ Publish Messages in our PubSub Topic """
-
-    def _init_(self, project_id: str, topic_name: str):
-        self.publisher = pubsub_v1.PublisherClient()
-        self.project_id = project_id
-        self.topic_name = topic_name
-
-    def publishMessages(self, message: str):
-        json_str = json.dumps(message)
-        topic_path = self.publisher.topic_path(self.project_id, self.topic_name)
-        self.publisher.publish(topic_path, json_str.encode("utf-8"))
-        logging.info("A New person has been monitored. Id: %s", message['persona_id'])
-
-    def _exit_(self):
-        self.publisher.transport.close()
-        logging.info("PubSub Client closed.")
-
 
 
 monitorear_red('172.28.40.1/25')
